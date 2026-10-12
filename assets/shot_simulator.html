@@ -1,0 +1,147 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box}body{margin:0;background:#f6f7f3;color:#18312b;font:15px system-ui,-apple-system,sans-serif}
+.wrap{max-width:920px;margin:auto;padding:12px}.stage{border:1px solid #dce5de;border-radius:18px;overflow:hidden;background:#163a29}
+canvas{display:block;width:100%;height:auto;aspect-ratio:900/490}
+.controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:14px 0 8px}
+button{background:#177653;color:#ffffff;font-weight:800;border:0;border-radius:10px;padding:13px 24px;font-size:16px;cursor:pointer}
+button:disabled{opacity:.5;cursor:wait}.result{font-size:17px;font-weight:700;min-height:26px}.detail{color:#64746b;font-size:13px;line-height:1.5}
+</style></head><body><div class="wrap"><div class="stage"><canvas id="pitch" width="900" height="490" aria-label="Animated football shot viewed from behind the shooter"></canvas></div>
+<div class="controls"><button id="kick">⚽ Take Shot!</button><span class="result" id="result" role="status" aria-live="polite">Ready for kickoff</span></div>
+<div class="detail">Each click runs one simulated attempt using PitchIQ's estimated scoring probability. Animations are illustrative, not measured ball or goalkeeper trajectories. A goal is never guaranteed.</div></div>
+<script>
+const SETTINGS = __SETTINGS__;
+const reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const cvs=document.getElementById('pitch'),ctx=cvs.getContext('2d');
+const btn=document.getElementById('kick'), result=document.getElementById('result');
+const W=900,H=490;
+const goal={l:295,r:605,t:98,b:263};
+let animation=null;
+// Projection is deliberately illustrative; coordinates on the mini-map are exact.
+function shooterScreenX(){return 450+(SETTINGS.shot_y-40)*3.3}
+function shooterScreenY(){return Math.min(425,Math.max(305,420-(SETTINGS.shot_x-60)*1.25))}
+function locationMap(){
+ const ox=731,oy=107,mw=143,mh=111;
+ ctx.fillStyle="rgba(6,27,33,.92)";ctx.fillRect(ox-9,oy-23,mw+17,mh+40);
+ ctx.strokeStyle="rgba(255,255,255,.8)";ctx.lineWidth=1.5;ctx.strokeRect(ox,oy,mw,mh);
+ ctx.beginPath();ctx.moveTo(ox+mw/2,oy);ctx.lineTo(ox+mw/2,oy+mh);ctx.stroke();
+ ctx.strokeRect(ox+mw-mw*(18/120),oy+mh*(18/80),mw*(18/120),mh*(44/80));
+ ctx.fillStyle="#bed3db";ctx.font="bold 12px system-ui";ctx.textAlign="left";ctx.fillText("SHOT LOCATION",ox,oy-7);
+ circle(ox+SETTINGS.shot_x/120*mw,oy+SETTINGS.shot_y/80*mh,5,"#ffb330","#fff");
+ ctx.fillStyle="#bed3db";ctx.font="11px system-ui";ctx.fillText(`(${SETTINGS.shot_x}, ${SETTINGS.shot_y})`,ox,oy+mh+15);
+}
+
+function line(x1,y1,x2,y2,color,width=2){ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.strokeStyle=color;ctx.lineWidth=width;ctx.stroke()}
+function circle(x,y,r,color,stroke=null){ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=2;ctx.stroke()}}
+function renderScene(ball,keeperX,keeperY,pose,runup=0,kick=0,heading=0,saveBall=null){
+  const sky=ctx.createLinearGradient(0,0,0,250);sky.addColorStop(0,'#0b2635');sky.addColorStop(1,'#244a55');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#132b35';ctx.fillRect(0,45,W,45);
+  for(let i=0;i<120;i++){ctx.fillStyle=i%3===0?'#758e9b':'#56747e';ctx.fillRect(i*8,61+(i%4)*4,4,3)}
+  const grass=ctx.createLinearGradient(0,230,0,H);grass.addColorStop(0,'#237343');grass.addColorStop(1,'#12482e');ctx.fillStyle=grass;ctx.fillRect(0,230,W,H);
+  ctx.fillStyle='rgba(255,255,255,.045)';ctx.fillRect(0,345,W,38);
+  line(180,490,goal.l-95,235,'rgba(255,255,255,.65)',2);line(720,490,goal.r+95,235,'rgba(255,255,255,.65)',2);
+  line(goal.l-95,235,goal.r+95,235,'rgba(255,255,255,.65)',2);
+  ctx.fillStyle='rgba(226,245,249,.11)';ctx.fillRect(goal.l,goal.t,goal.r-goal.l,goal.b-goal.t);
+  for(let x=goal.l;x<=goal.r;x+=15)line(x,goal.t,x,goal.b,'rgba(255,255,255,.2)',1);
+  for(let y=goal.t;y<=goal.b;y+=15)line(goal.l,y,goal.r,y,'rgba(255,255,255,.2)',1);
+  ctx.strokeStyle='#fafafa';ctx.lineWidth=9;ctx.strokeRect(goal.l,goal.t,goal.r-goal.l,goal.b-goal.t);
+  // Goalkeeper arms follow the save side and contact position.
+  ctx.save();ctx.translate(keeperX,keeperY);ctx.rotate(pose*.8);
+  circle(0,-31,14,'#f1c9a4');line(0,-14,0,24,'#f0c449',16);
+  line(-2,-4,-31,6,'#f1c9a4',9);line(2,-4,31,6,'#f1c9a4',9);
+  line(0,20,-17,43,'#27354b',10);line(0,20,17,43,'#27354b',10);ctx.restore();
+  const sx=shooterScreenX(),sy=shooterScreenY();
+  const headShot=SETTINGS.body_part==='Head';
+  // Run-up moves the player toward a stationary ball ahead of their feet. Headers jump toward an airborne ball.
+  ctx.save();ctx.translate(sx,sy+20-38*runup-(headShot?18*heading:0));
+  const scale=1.0-(420-sy)*.0007;ctx.scale(scale,scale);
+  ctx.fillStyle='rgba(0,0,0,.23)';ctx.beginPath();ctx.ellipse(0,28+18*(headShot?heading:0),36,8,0,0,Math.PI*2);ctx.fill();
+  ctx.save();ctx.rotate(headShot?heading*.18:0);
+  ctx.fillStyle='#1c4cad';ctx.fillRect(-23,-75,46,57);
+  circle(0,-89-(headShot?7*heading:0),15,'#dca67d');
+  line(-10,-64,-30,-35-10*(headShot?heading:runup),'#dca67d',10);
+  line(10,-64,30,-35-10*(headShot?heading:runup),'#dca67d',10);
+  // Plant and swing the actual chosen leg, mirroring the motion.
+  const side=SETTINGS.body_part==='Left Foot'?-1:1;
+  if(headShot){
+    line(-13,-18,-22,18,'#f1f1f1',13);line(-22,18,-31,21,'#242b37',7);
+    line(13,-18,22,18,'#f1f1f1',13);line(22,18,31,21,'#242b37',7);
+  }else{
+    const plant=-side;
+    line(plant*13,-18,plant*21,18,'#f1f1f1',13);
+    line(plant*21,18,plant*29,21,'#242b37',7);
+    // Draw the kick in two connected segments; leg is lifted then extends on contact.
+    const phase=kick<.55?kick/.55:(kick-.55)/.45;
+    const back=kick<.55?Math.sin(Math.PI*phase)*.9:0;
+    const forward=kick>=.55?Math.sin(Math.PI*phase)*1.15:0;
+    const kneeX=side*(14+12*back-11*forward);
+    const kneeY=-17+30-12*back-13*forward;
+    const footX=kneeX+side*(11+9*back-30*forward);
+    const footY=kneeY+18+9*back-15*forward;
+    line(side*14,-17,kneeX,kneeY,'#f1f1f1',13);
+    line(kneeX,kneeY,footX,footY,'#f1f1f1',12);
+    line(footX,footY,footX+side*10,footY,'#242b37',7);
+  }
+  ctx.fillStyle='#fff';ctx.font='bold 20px system-ui';ctx.textAlign='center';ctx.fillText(SETTINGS.jersey,0,-37);
+  ctx.restore();ctx.restore();
+  if(ball){circle(ball.x,ball.y,ball.r,'#ffffff','#142631');circle(ball.x-3,ball.y-2,Math.max(2,ball.r*.3),'#172c3d')}
+  if(saveBall){
+    // Saved ball visibly deflects back out of goal, in front of the keeper.
+    circle(saveBall.x,saveBall.y,saveBall.r,'#ffffff','#142631');
+    circle(saveBall.x-2,saveBall.y-2,Math.max(2,saveBall.r*.3),'#172c3d');
+  }
+  ctx.fillStyle='#fff';ctx.font='bold 16px system-ui';ctx.textAlign='left';ctx.fillText(SETTINGS.shooter+'  vs  '+SETTINGS.keeper,20,27);
+  ctx.fillStyle='#bddae0';ctx.font='14px system-ui';ctx.fillText('Estimated goal probability: '+(SETTINGS.probability*100).toFixed(2)+'%',20,50);
+  locationMap();
+}
+function ease(t){t=Math.min(1,Math.max(0,t));return t*t*(3-2*t)}
+function mix(a,b,t){return a+(b-a)*t}
+function start(){
+ if(animation)cancelAnimationFrame(animation);btn.disabled=true;result.textContent='Shot in motion…';
+ const goalScored=Math.random()<SETTINGS.probability;
+ const resultType=goalScored?'GOAL!':(Math.random()<.68?'SAVED!':'MISSED!');
+ if(reducedMotion){result.textContent=resultType;btn.disabled=false;return;}
+ const aimX=SETTINGS.target==='Left corner'?goal.l+35:SETTINGS.target==='Right corner'?goal.r-35:450;
+ // Target is inside the frame for goals, outside for misses.
+ const impactX=resultType==='MISSED!'?(SETTINGS.target==='Left corner'?goal.l-40:SETTINGS.target==='Right corner'?goal.r+40:goal.r+40):aimX;
+ const impactY=resultType==='MISSED!'?goal.t+38:goal.t+85;
+ // A save must reach keeper's hands at impact, then rebound into the foreground.
+ const keeperEnd=resultType==='SAVED!'?impactX:450+(Math.random()<.5?-90:90);
+ const contact=.36, flightEnd=.77, total=2150;
+ let startTime=null;
+ function frame(now){
+   if(startTime===null)startTime=now;
+   const t=Math.min(1,(now-startTime)/total);
+   const approach=ease(Math.min(1,t/.29));
+   const kicking=t<.18?0:ease((t-.18)/.27);
+   const heading=SETTINGS.body_part==='Head'?Math.sin(Math.PI*Math.min(1,Math.max(0,(t-.17)/.33))):0;
+   const flight=ease((t-contact)/(flightEnd-contact));
+   const sx=shooterScreenX(),sy=shooterScreenY();
+   const startX=sx+(SETTINGS.body_part==='Left Foot'?-26:26);
+   const startY=SETTINGS.body_part==='Head'?sy-120:sy-6;
+   let ball=null,deflection=null;
+   if(t<contact){ball={x:startX,y:startY,r:SETTINGS.body_part==='Head'?10:13}}
+   else if(t<flightEnd){
+     ball={x:mix(startX,impactX,flight),y:mix(startY,impactY,flight)-38*Math.sin(Math.PI*flight),r:mix(13,5,flight)};
+   }else if(resultType==='SAVED!'){
+     const rebound=ease((t-flightEnd)/(1-flightEnd));
+     // Rebound away from the goal and towards the viewer.
+     deflection={x:mix(impactX,impactX+(impactX<450?-95:95),rebound),
+        y:mix(impactY,345,rebound)+18*Math.sin(Math.PI*rebound),r:mix(5,12,rebound)};
+   }else if(resultType==='GOAL!'){
+     const net=ease((t-flightEnd)/(1-flightEnd));
+     ball={x:impactX,y:mix(impactY,impactY+23,net),r:5};
+   }else{
+     const out=ease((t-flightEnd)/(1-flightEnd));
+     ball={x:mix(impactX,impactX+(impactX<450?-50:50),out),y:mix(impactY,impactY-35,out),r:5};
+   }
+   const gx=mix(450,keeperEnd,ease((flight-.23)/.72));
+   const pose=(keeperEnd<450?-1:1)*ease((flight-.27)/.65);
+   renderScene(ball,gx,219,pose,approach,kicking,heading,deflection);
+   if(t<1){animation=requestAnimationFrame(frame)}
+   else{animation=null;btn.disabled=false;result.textContent=resultType==='GOAL!'?'🥅 GOAL!':resultType==='SAVED!'?'🧤 SAVED!':'↗️ MISSED!'}
+ }animation=requestAnimationFrame(frame)
+}
+btn.addEventListener('click',start);
+renderScene({x:shooterScreenX()+(SETTINGS.body_part==="Left Foot"?-26:26),y:SETTINGS.body_part==="Head"?shooterScreenY()-120:shooterScreenY()-6,r:13},450,219,0);
+</script></body></html>

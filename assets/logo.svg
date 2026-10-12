@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="60" viewBox="0 0 240 60">
+  <rect x="0" y="8" width="42" height="42" rx="12" fill="#bde9ab"/>
+  <path d="M12 39V19h9c8 0 12 3 12 9s-4 9-12 9h-3v2zm6-9h3c4 0 6-1 6-3s-2-3-6-3h-3z" fill="#102d25"/>
+  <text x="54" y="40" font-family="Arial, sans-serif" font-weight="700" font-size="32" fill="#f2f7f0">Pitch<tspan fill="#bde9ab">IQ</tspan></text>
+</svg>

@@ -1,0 +1,27 @@
+name: Portfolio checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    env:
+      PITCHIQ_DATA_MODE: demo
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+          cache: pip
+      - name: Verify files for public portfolio
+        run: python scripts/check_publication.py --tracked
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - run: python -m compileall -q app.py pitchiq pages views scripts
