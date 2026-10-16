@@ -5,8 +5,8 @@ from pitchiq.data import load_matches, using_demo
 from pitchiq.ui import demo_notice, footer
 
 mode_label = "FICTIONAL DEMO + OPTIONAL HISTORICAL MATCHES" if using_demo() else "HISTORICAL DATA &nbsp; / &nbsp; EXPERIMENTAL ML"
-st.markdown('''<div class="iq-hero"><div><div class="iq-eyebrow">A different view of the game</div>
-<h1>Follow the numbers.<br><span class="iq-accent">Understand the game.</span></h1>
+st.markdown('''<div class="iq-hero"><div>
+<h1>PitchIQ — A football analytics project</h1>
 <p>Compare the players. Explore the results. Play out the possibilities.
 Pick a tool and explore the numbers.</p>
 <span class="iq-pill">__MODE_LABEL__</span></div>
